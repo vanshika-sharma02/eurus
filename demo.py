@@ -1,95 +1,159 @@
 #!/usr/bin/env python3
 """
-Demo script showing how to use the Email and Name Scraper
+Demo script for the Enhanced Email and Name Scraper
+This script demonstrates both single-page scraping and website crawling.
 """
 
+import sys
 from email_scraper import EmailNameScraper
-import json
 
-def demo_scraper():
-    """Demonstrate the email scraper functionality"""
-    print("🔍 Email and Name Scraper Demo")
+def demo_with_real_website():
+    """
+    Demo using a real website that's likely to have contact information.
+    Note: This is for demonstration purposes only. Always respect robots.txt and terms of service.
+    """
+    print("🔍 Enhanced Email Scraper Demo")
     print("=" * 50)
     
     # Create scraper instance
-    scraper = EmailNameScraper(delay=2)  # Be respectful with 2-second delay
+    scraper = EmailNameScraper(
+        delay=2,          # Be respectful - 2 second delay
+        max_pages=10,     # Limit to 10 pages for demo
+        respect_robots=True
+    )
     
-    # Example URLs that are safe to scrape
-    demo_urls = [
-        "https://httpbin.org/",  # Safe testing endpoint
-    ]
+    # Example: Scrape a single contact page
+    print("\n📄 DEMO 1: Single Page Scraping")
+    print("-" * 30)
     
-    print(f"📄 Scraping {len(demo_urls)} page(s)...")
-    print()
+    # Using a test website that should have some contact info
+    test_url = "https://httpbin.org/html"  # Simple test page
     
-    # Scrape the pages
-    results = scraper.scrape_multiple_pages(demo_urls)
+    print(f"Scraping single page: {test_url}")
+    result = scraper.scrape_page(test_url)
     
-    # Display results
-    total_emails = 0
-    for result in results:
-        print(f"🌐 URL: {result['url']}")
-        print(f"📊 Status: {result['status']}")
-        print(f"📧 Emails found: {result['emails_found']}")
-        
-        if result['data']:
-            print("📝 Results:")
-            for item in result['data']:
-                name_display = f" ({item['name']})" if item['name'] else " (no name found)"
-                print(f"   • {item['email']}{name_display}")
-        else:
-            print("   No emails found on this page")
-        
-        total_emails += result['emails_found']
-        print("-" * 50)
+    print(f"Status: {result['status']}")
+    print(f"Emails found: {result['emails_found']}")
+    if result['data']:
+        for item in result['data']:
+            print(f"  • {item['email']} - {item['name'] or 'No name'}")
+    else:
+        print("  No emails found on this test page")
     
-    print(f"🎯 Total emails found: {total_emails}")
+    # Example: Demonstrate website crawling (with a very small site)
+    print("\n🕷️  DEMO 2: Website Crawling")
+    print("-" * 30)
+    print("For website crawling, you would use:")
+    print("  scraper.scrape_website('https://yourwebsite.com')")
+    print("\nThis would automatically:")
+    print("  ✓ Discover all pages on the website")
+    print("  ✓ Respect robots.txt rules")
+    print("  ✓ Extract emails and associated names")
+    print("  ✓ Track which page each email was found on")
     
-    # Save results if any found
-    if total_emails > 0:
-        scraper.save_results(results, 'json', 'demo_results')
-        print("💾 Results saved to demo_results.json")
-    
-    return results
+    print("\n📊 DEMO 3: Command Line Usage Examples")
+    print("-" * 30)
+    print("Scrape specific pages:")
+    print("  python email_scraper.py https://example.com/contact https://example.com/about")
+    print("\nCrawl entire website:")
+    print("  python email_scraper.py --crawl-website https://example.com")
+    print("\nWith custom options:")
+    print("  python email_scraper.py --crawl-website --delay 3 --max-pages 50 --output excel https://example.com")
+    print("\nIgnore robots.txt (use responsibly):")
+    print("  python email_scraper.py --crawl-website --no-robots https://example.com")
 
-def show_usage_examples():
-    """Show usage examples"""
-    print("\n🚀 Usage Examples:")
+def demo_features():
+    """Demonstrate the key features of the scraper."""
+    print("\n🚀 SCRAPER FEATURES")
     print("=" * 50)
     
-    print("1. Basic command line usage:")
-    print("   python email_scraper.py https://example.com/contact")
+    features = [
+        "✅ Website Crawling - Automatically discovers all pages",
+        "✅ Email Extraction - Uses advanced regex patterns",
+        "✅ Name Association - Finds names near email addresses",
+        "✅ Multiple Output Formats - CSV, JSON, Excel",
+        "✅ Robots.txt Respect - Ethical scraping practices",
+        "✅ Rate Limiting - Configurable delays between requests",
+        "✅ Error Handling - Robust error recovery",
+        "✅ Structured Data - Extracts from JSON-LD, microdata",
+        "✅ Contact Sections - Targeted extraction from contact areas",
+        "✅ Page Context - Tracks page titles and URLs",
+        "✅ Duplicate Removal - Smart deduplication",
+        "✅ Logging - Detailed progress tracking"
+    ]
     
-    print("\n2. Multiple pages with custom settings:")
-    print("   python email_scraper.py https://company.com/contact https://company.com/team \\")
-    print("          --delay 3 --output csv --filename results")
+    for feature in features:
+        print(f"  {feature}")
     
-    print("\n3. Library usage:")
+    print("\n📋 OUTPUT FORMAT")
+    print("-" * 20)
+    print("The scraper outputs data with:")
+    print("  • Email address")
+    print("  • Associated name (if found)")
+    print("  • Source page URL")
+    print("  • Page title")
+    print("  • Scraping status")
+
+def demo_code_examples():
+    """Show code examples for using the scraper."""
+    print("\n💻 CODE EXAMPLES")
+    print("=" * 50)
+    
+    print("1. Basic single page scraping:")
     print("""
-   from email_scraper import EmailNameScraper
-   
-   scraper = EmailNameScraper(delay=1)
-   results = scraper.scrape_page("https://example.com/contact")
-   
-   for item in results['data']:
-       print(f"Email: {item['email']}, Name: {item['name']}")
-   """)
+    from email_scraper import EmailNameScraper
     
-    print("\n⚠️  Important Notes:")
-    print("- Always respect robots.txt and website terms of service")
-    print("- Use appropriate delays between requests")
-    print("- Ensure you have permission to scrape the websites")
-    print("- Handle extracted data responsibly and in compliance with privacy laws")
+    scraper = EmailNameScraper(delay=1)
+    result = scraper.scrape_page('https://example.com/contact')
+    print(f"Found {result['emails_found']} emails")
+    """)
+    
+    print("2. Crawl entire website:")
+    print("""
+    scraper = EmailNameScraper(delay=2, max_pages=50)
+    results = scraper.scrape_website('https://example.com')
+    scraper.save_results(results, 'csv', 'my_results')
+    """)
+    
+    print("3. Multiple specific pages:")
+    print("""
+    urls = ['https://example.com/contact', 'https://example.com/team']
+    results = scraper.scrape_multiple_pages(urls)
+    """)
+    
+    print("4. Custom configuration:")
+    print("""
+    scraper = EmailNameScraper(
+        delay=3,              # 3 second delay
+        max_pages=100,        # Up to 100 pages
+        respect_robots=False  # Ignore robots.txt
+    )
+    """)
+
+def main():
+    """Main demo function."""
+    print("� Welcome to the Enhanced Email Scraper Demo!")
+    
+    # Show features
+    demo_features()
+    
+    # Show code examples
+    demo_code_examples()
+    
+    # Run actual demo
+    demo_with_real_website()
+    
+    print("\n" + "=" * 50)
+    print("🎉 Demo completed!")
+    print("\nNext steps:")
+    print("1. Install dependencies: pip install -r requirements.txt")
+    print("2. Run with your target website: python email_scraper.py --crawl-website https://yoursite.com")
+    print("3. Check the output CSV file for results")
+    print("\n⚠️  Remember to:")
+    print("  • Respect website terms of service")
+    print("  • Use appropriate delays")
+    print("  • Check robots.txt")
+    print("  • Use scraped data responsibly")
 
 if __name__ == "__main__":
-    print("🎉 Welcome to the Email and Name Scraper!")
-    print()
-    
-    # Run demo
-    demo_scraper()
-    
-    # Show usage examples
-    show_usage_examples()
-    
-    print("\n✅ Demo completed! The scraper is ready to use.")
-    print("📖 Check README.md for detailed documentation.")
+    main()
