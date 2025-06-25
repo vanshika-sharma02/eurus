@@ -10,19 +10,28 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import argparse
 import time
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
 from typing import List, Dict, Tuple, Set
 import json
+from collections import deque
 
 class EmailNameScraper:
-    def __init__(self, delay=1):
+    def __init__(self, delay=1, max_depth=2, max_pages=50, respect_robots=True):
         """
-        Initialize the scraper with optional delay between requests.
+        Initialize the scraper with crawling capabilities.
         
         Args:
             delay (int): Delay in seconds between requests to be respectful to servers
+            max_depth (int): Maximum depth to crawl from starting URLs
+            max_pages (int): Maximum number of pages to scrape per domain
+            respect_robots (bool): Whether to respect robots.txt
         """
         self.delay = delay
+        self.max_depth = max_depth
+        self.max_pages = max_pages
+        self.respect_robots = respect_robots
+        
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -37,6 +46,16 @@ class EmailNameScraper:
             r'([A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+)',  # First M. Last
             r'([A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+)',  # First Middle Last
             r'([A-Z]{2,}\s+[A-Z][a-z]+)',  # FIRST Last or similar
+        ]
+        
+        # Crawling state
+        self.visited_urls = set()
+        self.robots_cache = {}
+        
+        # Link patterns that are likely to contain emails
+        self.priority_link_patterns = [
+            r'contact', r'about', r'team', r'staff', r'directory', 
+            r'people', r'faculty', r'employees', r'management'
         ]
     
     def extract_emails_from_text(self, text: str) -> Set[str]:
@@ -114,6 +133,243 @@ class EmailNameScraper:
                         results.append((email, ""))
         
         return results
+    
+    def check_robots_txt(self, url: str) -> bool:
+        """
+        Check if URL is allowed according to robots.txt
+        
+        Args:
+            url (str): URL to check
+            
+        Returns:
+            bool: True if allowed, False if disallowed
+        """
+        if not self.respect_robots:
+            return True
+            
+        parsed_url = urlparse(url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        
+        if base_url not in self.robots_cache:
+            try:
+                robots_url = urljoin(base_url, '/robots.txt')
+                rp = RobotFileParser()
+                rp.set_url(robots_url)
+                rp.read()
+                self.robots_cache[base_url] = rp
+            except Exception:
+                # If we can't read robots.txt, assume it's allowed
+                self.robots_cache[base_url] = None
+        
+        rp = self.robots_cache[base_url]
+        if rp is None:
+            return True
+            
+        return rp.can_fetch(self.session.headers.get('User-Agent', '*'), url)
+    
+    def normalize_url(self, url: str, base_url: str) -> str:
+        """
+        Normalize and clean URL
+        
+        Args:
+            url (str): URL to normalize
+            base_url (str): Base URL for relative links
+            
+        Returns:
+            str: Normalized URL
+        """
+        # Convert relative URLs to absolute
+        full_url = urljoin(base_url, url)
+        
+        # Parse and rebuild URL to normalize it
+        parsed = urlparse(full_url)
+        
+        # Remove fragments and common tracking parameters
+        query_parts = []
+        if parsed.query:
+            for param in parsed.query.split('&'):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    # Skip common tracking parameters
+                    if key.lower() not in ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'fbclid', 'gclid']:
+                        query_parts.append(param)
+        
+        normalized = urlunparse((
+            parsed.scheme,
+            parsed.netloc.lower(),
+            parsed.path.rstrip('/') or '/',
+            parsed.params,
+            '&'.join(query_parts),
+            ''  # Remove fragment
+        ))
+        
+        return normalized
+    
+    def is_same_domain(self, url1: str, url2: str) -> bool:
+        """
+        Check if two URLs are from the same domain
+        
+        Args:
+            url1 (str): First URL
+            url2 (str): Second URL
+            
+        Returns:
+            bool: True if same domain
+        """
+        domain1 = urlparse(url1).netloc.lower()
+        domain2 = urlparse(url2).netloc.lower()
+        
+        # Remove www. for comparison
+        domain1 = domain1.replace('www.', '')
+        domain2 = domain2.replace('www.', '')
+        
+        return domain1 == domain2
+    
+    def extract_links(self, soup: BeautifulSoup, base_url: str) -> List[str]:
+        """
+        Extract all valid links from a page
+        
+        Args:
+            soup (BeautifulSoup): Parsed HTML
+            base_url (str): Base URL of the page
+            
+        Returns:
+            List[str]: List of normalized URLs
+        """
+        links = []
+        
+        # Find all links
+        for link in soup.find_all('a', href=True):
+            href = link.get('href')
+            if not href:
+                continue
+                
+            # Skip mailto, tel, javascript, etc.
+            if href.startswith(('mailto:', 'tel:', 'javascript:', '#')):
+                continue
+                
+            # Normalize the URL
+            try:
+                normalized_url = self.normalize_url(href, base_url)
+                
+                # Only include HTTP/HTTPS links
+                if normalized_url.startswith(('http://', 'https://')):
+                    # Only include links from the same domain
+                    if self.is_same_domain(normalized_url, base_url):
+                        links.append(normalized_url)
+            except Exception:
+                continue
+        
+        return list(set(links))  # Remove duplicates
+    
+    def filter_priority_links(self, links: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Separate priority links (likely to contain contacts) from regular links
+        
+        Args:
+            links (List[str]): List of all links
+            
+        Returns:
+            Tuple[List[str], List[str]]: (priority_links, regular_links)
+        """
+        priority_links = []
+        regular_links = []
+        
+        for link in links:
+            link_lower = link.lower()
+            is_priority = any(pattern in link_lower for pattern in self.priority_link_patterns)
+            
+            if is_priority:
+                priority_links.append(link)
+            else:
+                regular_links.append(link)
+        
+        return priority_links, regular_links
+    
+    def crawl_website(self, start_urls: List[str]) -> List[Dict]:
+        """
+        Crawl website starting from given URLs, following links to find more pages
+        
+        Args:
+            start_urls (List[str]): Starting URLs to crawl from
+            
+        Returns:
+            List[Dict]: Results from all crawled pages
+        """
+        all_results = []
+        
+        # Group URLs by domain to respect per-domain limits
+        domain_urls = {}
+        for url in start_urls:
+            domain = urlparse(url).netloc.lower().replace('www.', '')
+            if domain not in domain_urls:
+                domain_urls[domain] = []
+            domain_urls[domain].append(url)
+        
+        for domain, urls in domain_urls.items():
+            print(f"\n🌐 Crawling domain: {domain}")
+            
+            # Initialize crawling queue with (url, depth)
+            crawl_queue = deque([(url, 0) for url in urls])
+            domain_visited = set()
+            domain_results = []
+            pages_scraped = 0
+            
+            while crawl_queue and pages_scraped < self.max_pages:
+                current_url, depth = crawl_queue.popleft()
+                
+                # Skip if already visited or depth exceeded
+                if current_url in domain_visited or depth > self.max_depth:
+                    continue
+                
+                # Check robots.txt
+                if not self.check_robots_txt(current_url):
+                    print(f"  ⚠️  Skipping {current_url} (blocked by robots.txt)")
+                    continue
+                
+                domain_visited.add(current_url)
+                pages_scraped += 1
+                
+                print(f"  📄 Scraping [{pages_scraped}/{self.max_pages}] (depth {depth}): {current_url}")
+                
+                # Scrape the current page
+                result = self.scrape_page(current_url)
+                domain_results.append(result)
+                
+                # If we haven't reached max depth, extract links for next level
+                if depth < self.max_depth and result['status'] == 'success':
+                    try:
+                        response = self.session.get(current_url, timeout=10)
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        
+                        # Extract all links
+                        links = self.extract_links(soup, current_url)
+                        
+                        # Prioritize certain types of links
+                        priority_links, regular_links = self.filter_priority_links(links)
+                        
+                        # Add priority links first
+                        for link in priority_links:
+                            if link not in domain_visited:
+                                crawl_queue.appendleft((link, depth + 1))  # Add to front for priority
+                        
+                        # Add regular links
+                        for link in regular_links[:10]:  # Limit regular links to prevent explosion
+                            if link not in domain_visited:
+                                crawl_queue.append((link, depth + 1))
+                        
+                        print(f"    🔗 Found {len(priority_links)} priority links, {len(regular_links)} regular links")
+                        
+                    except Exception as e:
+                        print(f"    ⚠️  Error extracting links: {e}")
+                
+                # Small delay between requests
+                time.sleep(self.delay)
+            
+            all_results.extend(domain_results)
+            print(f"  ✅ Completed domain {domain}: {pages_scraped} pages, {sum(r['emails_found'] for r in domain_results)} emails")
+        
+        return all_results
     
     def scrape_page(self, url: str) -> Dict:
         """
@@ -255,12 +511,32 @@ def main():
     parser.add_argument('--output', choices=['csv', 'json', 'excel'], default='csv', help='Output format')
     parser.add_argument('--filename', default='scraped_emails', help='Output filename (without extension)')
     
+    # Crawling options
+    parser.add_argument('--crawl', action='store_true', help='Enable crawling to follow links and discover more pages')
+    parser.add_argument('--max-depth', type=int, default=2, help='Maximum crawling depth (default: 2)')
+    parser.add_argument('--max-pages', type=int, default=50, help='Maximum pages to scrape per domain (default: 50)')
+    parser.add_argument('--ignore-robots', action='store_true', help='Ignore robots.txt restrictions')
+    
     args = parser.parse_args()
     
-    scraper = EmailNameScraper(delay=args.delay)
+    # Create scraper with crawling parameters
+    scraper = EmailNameScraper(
+        delay=args.delay,
+        max_depth=args.max_depth,
+        max_pages=args.max_pages,
+        respect_robots=not args.ignore_robots
+    )
     
-    print(f"Starting to scrape {len(args.urls)} page(s)...")
-    results = scraper.scrape_multiple_pages(args.urls)
+    if args.crawl:
+        print(f"🕷️  Starting to crawl from {len(args.urls)} starting URL(s)...")
+        print(f"   Max depth: {args.max_depth}")
+        print(f"   Max pages per domain: {args.max_pages}")
+        print(f"   Respect robots.txt: {not args.ignore_robots}")
+        print(f"   Delay between requests: {args.delay} seconds")
+        results = scraper.crawl_website(args.urls)
+    else:
+        print(f"📄 Starting to scrape {len(args.urls)} specific page(s)...")
+        results = scraper.scrape_multiple_pages(args.urls)
     
     # Print summary
     total_emails = sum(result['emails_found'] for result in results)

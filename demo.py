@@ -57,14 +57,21 @@ def show_usage_examples():
     print("\n🚀 Usage Examples:")
     print("=" * 50)
     
-    print("1. Basic command line usage:")
+    print("1. Basic single page scraping:")
     print("   python email_scraper.py https://example.com/contact")
     
-    print("\n2. Multiple pages with custom settings:")
+    print("\n2. Website crawling (NEW!):")
+    print("   python email_scraper.py https://company.com --crawl --max-depth 2 --max-pages 20")
+    
+    print("\n3. Multiple specific pages:")
     print("   python email_scraper.py https://company.com/contact https://company.com/team \\")
     print("          --delay 3 --output csv --filename results")
     
-    print("\n3. Library usage:")
+    print("\n4. Advanced crawling:")
+    print("   python email_scraper.py https://university.edu \\")
+    print("          --crawl --max-depth 3 --max-pages 50 --delay 2")
+    
+    print("\n5. Library usage - single page:")
     print("""
    from email_scraper import EmailNameScraper
    
@@ -73,6 +80,17 @@ def show_usage_examples():
    
    for item in results['data']:
        print(f"Email: {item['email']}, Name: {item['name']}")
+   """)
+    
+    print("\n6. Library usage - website crawling:")
+    print("""
+   from email_scraper import EmailNameScraper
+   
+   crawler = EmailNameScraper(max_depth=2, max_pages=20)
+   results = crawler.crawl_website(["https://company.com"])
+   
+   total_emails = sum(r['emails_found'] for r in results)
+   print(f"Found {total_emails} emails across {len(results)} pages")
    """)
     
     print("\n⚠️  Important Notes:")
